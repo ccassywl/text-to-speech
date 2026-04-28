@@ -142,16 +142,17 @@
 
         let synth = window.speechSynthesis;
         let voices = [];
+        
+        // FIX 1: This global variable stops the browser's memory manager from deleting the speech process early!
+        let globalUtterance = null; 
 
-        // Check if user is opening this without a server
         if (window.location.protocol === 'file:') {
-            statusDiv.innerHTML = '⚠️ Security Warning: You are opening this directly from a file. Browsers block the recording/download feature in this mode. Please run this using http://localhost:8000';
-            statusDiv.style.backgroundColor = '#fde7e9';
+            statusDiv.innerHTML = '⚠️ Security Warning: You are opening this directly from a file. Please use your GitHub Pages link.';
         }
 
         function populateVoiceList() {
             voices = synth.getVoices();
-            if (voices.length === 0) return; // Wait if not loaded yet
+            if (voices.length === 0) return; 
             
             voiceSelect.innerHTML = '';
             let hasEnglish = false;
@@ -166,17 +167,12 @@
                     voiceSelect.appendChild(option);
                 }
             }
-
-            if (!hasEnglish) {
-                voiceSelect.innerHTML = '<option value="">No English voices found on this system.</option>';
-            }
+            if (!hasEnglish) voiceSelect.innerHTML = '<option value="">No English voices found.</option>';
         }
         
-        // Browsers sometimes have a delay loading voices, these checks force it to load
         synth.onvoiceschanged = populateVoiceList;
         populateVoiceList();
         setTimeout(populateVoiceList, 500);
-        setTimeout(populateVoiceList, 1000);
 
         function createUtterance() {
             const utterance = new SpeechSynthesisUtterance(textInput.value);
@@ -192,7 +188,10 @@
 
         speakButton.addEventListener('click', () => {
             if (synth.speaking) synth.cancel();
-            if (textInput.value !== '') synth.speak(createUtterance());
+            if (textInput.value !== '') {
+                globalUtterance = createUtterance(); // Store in global variable
+                synth.speak(globalUtterance);
+            }
         });
         
         pauseButton.addEventListener('click', () => {
@@ -208,39 +207,43 @@
         
         // --- Download Logic ---
         downloadButton.addEventListener('click', async () => {
-            if (window.location.protocol === 'file:') {
-                alert("Your browser blocks recording from local files. You must use a local server (http://localhost:8000) for the download to work.");
-                return;
-            }
             if (!textInput.value.trim()) {
                 statusDiv.textContent = 'Please enter some text to generate audio.';
                 return;
             }
-            if (synth.speaking) {
-                synth.cancel();
-            }
+            if (synth.speaking) synth.cancel();
 
-            statusDiv.textContent = 'Preparing download... Please select "Share tab audio" in the popup.';
+            statusDiv.textContent = 'Preparing download... Please toggle "Share tab audio" in the popup window!';
             downloadButton.disabled = true;
 
             try {
                 const stream = await navigator.mediaDevices.getDisplayMedia({
                     video: true,
-                    audio: { sampleRate: 44100 }
+                    audio: true // Force it to ask for audio
                 });
 
-                const audioStream = new MediaStream(stream.getAudioTracks());
-                const mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+                // FIX 2: Check if the user forgot to tick "Share tab audio"
+                const audioTracks = stream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    stream.getTracks().forEach(track => track.stop()); // Cancel the recording
+                    statusDiv.textContent = '❌ Error: You forgot to toggle "Share tab audio" in the popup!';
+                    downloadButton.disabled = false;
+                    return;
+                }
+
+                const audioStream = new MediaStream(audioTracks);
+                const mediaRecorder = new MediaRecorder(audioStream);
                 const audioChunks = [];
                 
                 mediaRecorder.addEventListener('dataavailable', event => {
-                    audioChunks.push(event.data);
+                    if (event.data.size > 0) audioChunks.push(event.data);
                 });
 
                 const utterance = createUtterance();
+                globalUtterance = utterance; // Keep alive in memory!
 
                 utterance.onstart = () => {
-                    statusDiv.textContent = 'Recording... Please wait for the speech to finish.';
+                    statusDiv.textContent = '🎙️ Recording... Please wait for the speech to finish.';
                     mediaRecorder.start();
                 };
 
@@ -262,7 +265,7 @@
                     window.URL.revokeObjectURL(audioUrl);
                     document.body.removeChild(a);
                     
-                    statusDiv.textContent = 'Download complete!';
+                    statusDiv.textContent = '✅ Download complete!';
                     downloadButton.disabled = false;
                 };
 
@@ -270,7 +273,7 @@
 
             } catch (err) {
                 console.error("Error capturing audio: ", err);
-                statusDiv.textContent = 'Error: Permission to record was denied, or tab audio was not shared.';
+                statusDiv.textContent = '❌ Error: Permission denied or you closed the popup.';
                 downloadButton.disabled = false;
             }
         });
