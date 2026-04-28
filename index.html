@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text-to-Speech Platform with MP3 Download</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            line-height: 1.6;
+        }
+        h1 {
+            color: #005a9e;
+            text-align: center;
+        }
+        textarea {
+            width: 100%;
+            height: 150px;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            font-size: 1rem;
+            margin-bottom: 20px;
+            box-sizing: border-box;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select, input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+        .button-group {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        button {
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #005a9e;
+        }
+        button#download-button {
+            background-color: #107c10; 
+        }
+        button#download-button:hover {
+            background-color: #0d650d;
+        }
+        button:disabled {
+            background-color: #a0a0a0;
+            cursor: not-allowed;
+        }
+        #rate-value, #pitch-value {
+            font-weight: bold;
+            color: #0078d4;
+        }
+        #status {
+            text-align: center;
+            margin-top: 20px;
+            font-weight: bold;
+            color: #d83b01;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Text-to-Speech Platform with MP3 Download</h1>
+
+    <textarea id="text-input" placeholder="Enter the text you want to convert to speech here..."></textarea>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="voice-select">Choose a Voice:</label>
+            <select id="voice-select">
+                <option value="">Loading voices...</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label for="rate">Speech Rate: <span id="rate-value">1</span></label>
+            <input type="range" id="rate" min="0.5" max="2" value="1" step="0.1">
+        </div>
+
+        <div class="control-group">
+            <label for="pitch">Speech Pitch: <span id="pitch-value">1</span></label>
+            <input type="range" id="pitch" min="0" max="2" value="1" step="0.1">
+        </div>
+    </div>
+
+    <div class="button-group">
+        <button id="speak-button">Speak</button>
+        <button id="pause-button">Pause</button>
+        <button id="resume-button">Resume</button>
+        <button id="download-button">Download MP3</button>
+    </div>
+
+    <div id="status"></div>
+
+    <script>
+        const textInput = document.getElementById('text-input');
+        const voiceSelect = document.getElementById('voice-select');
+        const rate = document.getElementById('rate');
+        const pitch = document.getElementById('pitch');
+        const rateValue = document.getElementById('rate-value');
+        const pitchValue = document.getElementById('pitch-value');
+        const speakButton = document.getElementById('speak-button');
+        const pauseButton = document.getElementById('pause-button');
+        const resumeButton = document.getElementById('resume-button');
+        const downloadButton = document.getElementById('download-button');
+        const statusDiv = document.getElementById('status');
+
+        let synth = window.speechSynthesis;
+        let voices = [];
+
+        // Check if user is opening this without a server
+        if (window.location.protocol === 'file:') {
+            statusDiv.innerHTML = '⚠️ Security Warning: You are opening this directly from a file. Browsers block the recording/download feature in this mode. Please run this using http://localhost:8000';
+            statusDiv.style.backgroundColor = '#fde7e9';
+        }
+
+        function populateVoiceList() {
+            voices = synth.getVoices();
+            if (voices.length === 0) return; // Wait if not loaded yet
+            
+            voiceSelect.innerHTML = '';
+            let hasEnglish = false;
+            
+            for (let i = 0; i < voices.length; i++) {
+                if (voices[i].lang.startsWith('en')) {
+                    hasEnglish = true;
+                    const option = document.createElement('option');
+                    option.textContent = `${voices[i].name} (${voices[i].lang})`;
+                    option.setAttribute('data-lang', voices[i].lang);
+                    option.setAttribute('data-name', voices[i].name);
+                    voiceSelect.appendChild(option);
+                }
+            }
+
+            if (!hasEnglish) {
+                voiceSelect.innerHTML = '<option value="">No English voices found on this system.</option>';
+            }
+        }
+        
+        // Browsers sometimes have a delay loading voices, these checks force it to load
+        synth.onvoiceschanged = populateVoiceList;
+        populateVoiceList();
+        setTimeout(populateVoiceList, 500);
+        setTimeout(populateVoiceList, 1000);
+
+        function createUtterance() {
+            const utterance = new SpeechSynthesisUtterance(textInput.value);
+            if(voiceSelect.selectedOptions[0]) {
+                const selectedVoiceName = voiceSelect.selectedOptions[0].getAttribute('data-name');
+                const selectedVoice = voices.find(voice => voice.name === selectedVoiceName);
+                utterance.voice = selectedVoice;
+            }
+            utterance.pitch = pitch.value;
+            utterance.rate = rate.value;
+            return utterance;
+        }
+
+        speakButton.addEventListener('click', () => {
+            if (synth.speaking) synth.cancel();
+            if (textInput.value !== '') synth.speak(createUtterance());
+        });
+        
+        pauseButton.addEventListener('click', () => {
+            if (synth.speaking && !synth.paused) synth.pause();
+        });
+        
+        resumeButton.addEventListener('click', () => {
+            if (synth.paused) synth.resume();
+        });
+
+        rate.addEventListener('input', () => rateValue.textContent = rate.value);
+        pitch.addEventListener('input', () => pitchValue.textContent = pitch.value);
+        
+        // --- Download Logic ---
+        downloadButton.addEventListener('click', async () => {
+            if (window.location.protocol === 'file:') {
+                alert("Your browser blocks recording from local files. You must use a local server (http://localhost:8000) for the download to work.");
+                return;
+            }
+            if (!textInput.value.trim()) {
+                statusDiv.textContent = 'Please enter some text to generate audio.';
+                return;
+            }
+            if (synth.speaking) {
+                synth.cancel();
+            }
+
+            statusDiv.textContent = 'Preparing download... Please select "Share tab audio" in the popup.';
+            downloadButton.disabled = true;
+
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: true,
+                    audio: { sampleRate: 44100 }
+                });
+
+                const audioStream = new MediaStream(stream.getAudioTracks());
+                const mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+                const audioChunks = [];
+                
+                mediaRecorder.addEventListener('dataavailable', event => {
+                    audioChunks.push(event.data);
+                });
+
+                const utterance = createUtterance();
+
+                utterance.onstart = () => {
+                    statusDiv.textContent = 'Recording... Please wait for the speech to finish.';
+                    mediaRecorder.start();
+                };
+
+                utterance.onend = () => {
+                    mediaRecorder.stop();
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/mp3' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+
+                    const a = document.createElement('a');
+                    a.href = audioUrl;
+                    a.download = 'speech.mp3';
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    window.URL.revokeObjectURL(audioUrl);
+                    document.body.removeChild(a);
+                    
+                    statusDiv.textContent = 'Download complete!';
+                    downloadButton.disabled = false;
+                };
+
+                synth.speak(utterance);
+
+            } catch (err) {
+                console.error("Error capturing audio: ", err);
+                statusDiv.textContent = 'Error: Permission to record was denied, or tab audio was not shared.';
+                downloadButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
